@@ -84,6 +84,28 @@ $$;
 
 grant execute on function match_staff_pin(text) to anon, authenticated;
 
+create or replace function set_order_status(order_id uuid, new_status text)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update orders
+  set status = new_status
+  where id = order_id;
+
+  if new_status in ('CANCELLED', 'COMPLETED') then
+    update tables
+    set status = 'AVAILABLE',
+        current_order_id = null
+    where current_order_id = order_id;
+  end if;
+end;
+$$;
+
+grant execute on function set_order_status(uuid, text) to anon, authenticated;
+
 create policy "Tables read all" on tables
   for select using (true);
 

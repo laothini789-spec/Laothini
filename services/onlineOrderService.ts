@@ -179,27 +179,9 @@ export const appendOrderItems = async (orderId: string, items: OrderItem[], tota
 
 export const updateOrderStatusRemote = async (orderId: string, status: OrderStatus) => {
     const client = requireSupabase();
-    const { data: orderData, error: orderError } = await client
-        .from('orders')
-        .select('id, table_id')
-        .eq('id', orderId)
-        .maybeSingle();
-    if (orderError) throw orderError;
-
     const { error } = await client
-        .from('orders')
-        .update({ status })
-        .eq('id', orderId);
+        .rpc('set_order_status', { order_id: orderId, new_status: status });
     if (error) throw error;
-
-    const tableId = orderData?.table_id || null;
-    if (tableId && (status === OrderStatus.CANCELLED || status === OrderStatus.COMPLETED)) {
-        const { error: tableError } = await client
-            .from('tables')
-            .update({ status: 'AVAILABLE', current_order_id: null })
-            .eq('id', tableId);
-        if (tableError) throw tableError;
-    }
 };
 
 export const getRecentOrdersWithItems = async (limit = 100) => {
