@@ -48,6 +48,12 @@ const KitchenDisplay = ({ onOpenOrder }: { onOpenOrder: (order: Order) => void }
     }, [selectedOrderId]);
 
     const selectedOrder = orders.find(o => o.id === selectedOrderId);
+    const handleCancelOrder = (order: Order) => {
+        if (confirm(`ต้องการยกเลิกออเดอร์ ${order.orderNumber} ใช่หรือไม่?`)) {
+            dataService.updateOrderStatus(order.id, OrderStatus.CANCELLED);
+            setSelectedOrderId(null);
+        }
+    };
 
     return (
         <div className="h-full bg-slate-100 flex overflow-hidden">
@@ -204,12 +210,20 @@ const KitchenDisplay = ({ onOpenOrder }: { onOpenOrder: (order: Order) => void }
 
                         {/* Bottom Action Bar */}
                         <div className="absolute bottom-0 right-0 p-6 bg-transparent pointer-events-none w-full flex justify-end">
-                            <button
-                                onClick={() => onOpenOrder(selectedOrder)}
-                                className="pointer-events-auto bg-orange-500 text-white px-6 py-3 rounded-lg font-bold shadow-lg hover:bg-orange-600 flex items-center gap-2 transform transition-transform hover:scale-105"
-                            >
-                                <span>เปิดหน้ารายการ</span>
-                            </button>
+                            <div className="pointer-events-auto flex gap-3">
+                                <button
+                                    onClick={() => handleCancelOrder(selectedOrder)}
+                                    className="bg-red-50 border border-red-200 text-red-600 px-6 py-3 rounded-lg font-bold shadow-sm hover:bg-red-100"
+                                >
+                                    ยกเลิกออเดอร์
+                                </button>
+                                <button
+                                    onClick={() => onOpenOrder(selectedOrder)}
+                                    className="bg-orange-500 text-white px-6 py-3 rounded-lg font-bold shadow-lg hover:bg-orange-600 flex items-center gap-2 transform transition-transform hover:scale-105"
+                                >
+                                    <span>เปิดหน้ารายการ</span>
+                                </button>
+                            </div>
                         </div>
                     </>
                 ) : (
@@ -1698,6 +1712,9 @@ const TableMap = ({
     const [qrTimestamp, setQrTimestamp] = useState<Date | null>(null);
     const [isQrSettingsOpen, setIsQrSettingsOpen] = useState(false);
     const [qrBaseUrl, setQrBaseUrl] = useState('');
+    const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
+    const [moveFromTable, setMoveFromTable] = useState<Table | null>(null);
+    const [moveToTableId, setMoveToTableId] = useState<string>('');
 
     // NEW: Edit Mode State
     const [isEditMode, setIsEditMode] = useState(false);
@@ -1781,6 +1798,54 @@ const TableMap = ({
             dataService.deleteTable(id);
             setTables([...dataService.getTables()]);
         }
+    };
+
+    const handleMoveTableClick = (e: React.MouseEvent, table: Table) => {
+        e.stopPropagation();
+        if (!table.currentOrderId) {
+            alert('โต๊ะนี้ยังไม่มีออเดอร์ที่กำลังใช้งาน');
+            return;
+        }
+        setMoveFromTable(table);
+        setMoveToTableId('');
+        setIsMoveModalOpen(true);
+    };
+
+    const handleConfirmMove = () => {
+        if (!moveFromTable || !moveFromTable.currentOrderId) return;
+        if (!moveToTableId) {
+            alert('กรุณาเลือกโต๊ะปลายทาง');
+            return;
+        }
+        const targetTable = dataService.getTable(moveToTableId);
+        if (!targetTable) {
+            alert('ไม่พบโต๊ะปลายทาง');
+            return;
+        }
+        if (targetTable.currentOrderId) {
+            alert('โต๊ะปลายทางมีออเดอร์อยู่แล้ว');
+            return;
+        }
+
+        const order = dataService.getOrder(moveFromTable.currentOrderId);
+        if (order) {
+            dataService.updateOrder({ ...order, tableId: targetTable.id });
+        }
+
+        dataService.updateTable({
+            ...moveFromTable,
+            status: 'AVAILABLE',
+            currentOrderId: undefined
+        });
+        dataService.updateTable({
+            ...targetTable,
+            status: 'OCCUPIED',
+            currentOrderId: moveFromTable.currentOrderId
+        });
+        setTables([...dataService.getTables()]);
+        setIsMoveModalOpen(false);
+        setMoveFromTable(null);
+        setMoveToTableId('');
     };
 
     useEffect(() => {
@@ -2126,6 +2191,15 @@ const TableMap = ({
                                             <QrCode size={14} />
                                         </button>
 
+                                        {/* Move Table Button */}
+                                        <button
+                                            onClick={(e) => handleMoveTableClick(e, table)}
+                                            className="p-1.5 rounded-lg border bg-white text-slate-400 border-slate-200 hover:text-indigo-600 hover:border-indigo-300 transition-colors"
+                                            title="ย้ายออเดอร์ไปโต๊ะอื่น"
+                                        >
+                                            <ArrowRight size={14} />
+                                        </button>
+
                                         {/* Clear Button */}
                                         <button
                                             onClick={(e) => handleUpdateTableStatus(e, table, 'AVAILABLE')}
@@ -2329,6 +2403,46 @@ const TableMap = ({
                                 บันทึก
                             </button>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {isMoveModalOpen && moveFromTable && (
+                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl shadow-2xl p-6 w-[420px]">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-lg font-bold text-slate-800">ย้ายออเดอร์</h3>
+                            <button onClick={() => setIsMoveModalOpen(false)} className="text-slate-400 hover:text-slate-600"><X size={20} /></button>
+                        </div>
+                        <div className="space-y-4">
+                            <div className="text-sm text-slate-600">
+                                จากโต๊ะ: <span className="font-semibold text-slate-800">{moveFromTable.name}</span>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-700 mb-1">เลือกโต๊ะปลายทาง</label>
+                                <select
+                                    value={moveToTableId}
+                                    onChange={(e) => setMoveToTableId(e.target.value)}
+                                    className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-accent bg-white text-slate-900"
+                                >
+                                    <option value="">-- เลือกโต๊ะ --</option>
+                                    {tables
+                                        .filter(t => t.id !== moveFromTable.id && !t.currentOrderId)
+                                        .map(t => (
+                                            <option key={t.id} value={t.id}>
+                                                {t.name} ({t.status === 'AVAILABLE' ? 'ว่าง' : 'จอง'})
+                                            </option>
+                                        ))}
+                                </select>
+                                <p className="text-xs text-slate-400 mt-2">แสดงเฉพาะโต๊ะว่างที่ยังไม่มีออเดอร์</p>
+                            </div>
+                            <button
+                                onClick={handleConfirmMove}
+                                className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold hover:bg-indigo-700"
+                            >
+                                ยืนยันย้ายโต๊ะ
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}

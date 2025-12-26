@@ -320,6 +320,15 @@ class DataService {
             if (order.paymentMethod === PaymentMethod.CASH) {
                 this.recordCashTransaction(order.total);
             }
+        } else if (status === OrderStatus.CANCELLED) {
+            order.status = status;
+            if (order.tableId) {
+                const table = this.tables.find(t => t.id === order.tableId);
+                if (table) {
+                    table.status = 'AVAILABLE';
+                    table.currentOrderId = undefined;
+                }
+            }
         } else {
             order.status = status;
             // Handle other status changes if needed
