@@ -1,0 +1,8 @@
+{
+  "name": "OmniPOS - ระบบจัดการร้านอาหาร",
+  "description": "ระบบ POS สำหรับร้านอาหารและบาร์ที่ครบวงจร พร้อมระบบจัดการโต๊ะ, คลังวัตถุดิบ (BOM), จอครัว (KDS), และระบบวิเคราะห์ด้วย AI",
+  "requestFramePermissions": [
+    "camera",
+    "bluetooth"
+  ]
+}
