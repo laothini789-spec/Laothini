@@ -10,6 +10,7 @@ class DataService {
     private tables: Table[] = [];
     private staff: Staff[] = STAFF_MEMBERS;
     private shifts: Shift[] = []; // Store shifts
+    private tableTokens: Record<string, string> = {};
 
     // New Data Stores
     private optionGroups: ProductOptionGroup[] = [
@@ -70,10 +71,19 @@ class DataService {
     ];
 
     constructor() {
-        this.tables = TABLES.map(table => ({
-            ...table,
-            qrToken: table.qrToken || this.generateQrToken()
-        }));
+        this.tableTokens = this.loadTableTokens();
+        this.tables = TABLES.map(table => {
+            const existingToken = this.tableTokens[table.id];
+            const qrToken = existingToken || table.qrToken || this.generateQrToken();
+            if (!existingToken) {
+                this.tableTokens[table.id] = qrToken;
+            }
+            return {
+                ...table,
+                qrToken
+            };
+        });
+        this.persistTableTokens();
         // Link Options to Products (Mocking the DB relationship)
         // Coffee & Tea -> Sweetness, Toppings
         // Link Options to Products (Mocking the DB relationship)
@@ -114,6 +124,25 @@ class DataService {
             createdAt: new Date(),
             paymentMethod: PaymentMethod.CASH
         });
+    }
+
+    private loadTableTokens() {
+        if (typeof window === 'undefined') return {};
+        try {
+            const raw = localStorage.getItem('omnipos_table_tokens');
+            return raw ? JSON.parse(raw) : {};
+        } catch {
+            return {};
+        }
+    }
+
+    private persistTableTokens() {
+        if (typeof window === 'undefined') return;
+        try {
+            localStorage.setItem('omnipos_table_tokens', JSON.stringify(this.tableTokens));
+        } catch {
+            // Ignore storage errors (e.g. private mode)
+        }
     }
 
     private generateQrToken() {
@@ -306,14 +335,29 @@ class DataService {
     getTables() { return this.tables; }
     getTable(id: string) { return this.tables.find(t => t.id === id); }
     addTable(table: Table) {
-        const withToken = { ...table, qrToken: table.qrToken || this.generateQrToken() };
+        const qrToken = table.qrToken || this.generateQrToken();
+        const withToken = { ...table, qrToken };
+        this.tableTokens[withToken.id] = qrToken;
+        this.persistTableTokens();
         this.tables.push(withToken);
     }
-    deleteTable(id: string) { this.tables = this.tables.filter(t => t.id !== id); }
+    deleteTable(id: string) {
+        this.tables = this.tables.filter(t => t.id !== id);
+        if (this.tableTokens[id]) {
+            delete this.tableTokens[id];
+            this.persistTableTokens();
+        }
+    }
     updateTable(table: Table) {
         const index = this.tables.findIndex(t => t.id === table.id);
         if (index !== -1) {
-            this.tables[index] = table;
+            const current = this.tables[index];
+            const qrToken = table.qrToken || current.qrToken;
+            this.tables[index] = { ...table, qrToken };
+            if (qrToken) {
+                this.tableTokens[table.id] = qrToken;
+                this.persistTableTokens();
+            }
         }
     }
 

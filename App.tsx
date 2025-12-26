@@ -1735,6 +1735,10 @@ const TableMap = ({
         setTables([...dataService.getTables()]); // Refresh
     };
 
+    useEffect(() => {
+        void syncTablesToSupabase(tables);
+    }, [tables]);
+
     const handleEditTableClick = (e: React.MouseEvent, table: Table) => {
         e.stopPropagation();
         handleEditTableInit(table);
