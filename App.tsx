@@ -5,7 +5,7 @@ import { Dashboard } from './components/Dashboard';
 import { MenuView } from './components/MenuView';
 import { CustomerOrderView } from './components/CustomerOrderView';
 import { dataService } from './services/dataService';
-import { getRecentOrdersWithItems } from './services/onlineOrderService';
+import { getRecentOrdersWithItems, updateOrderStatusRemote } from './services/onlineOrderService';
 import { supabase, isSupabaseConfigured } from './services/supabaseClient';
 import { Order, OrderItem, OrderStatus, OrderType, Table, Staff, Role, PaymentMethod, Ingredient, PrinterConfig, Category, PrintSettings, TaxSettings, ReceiptConfig, Product, RecipeItem, Shift } from './types';
 import { Bell, ChefHat, Package, Settings as SettingsIcon, Monitor, ScrollText, Users, Lock, Unlock, X, Bike, Clock, Printer, CheckCircle, FileText, Tags, Plus, ShoppingBag, ChevronLeft, UtensilsCrossed, Edit, Trash2, Minus, Save, AlertTriangle, FilePenLine, KeyRound, CheckSquare, Square, CreditCard, Banknote, QrCode, Sliders, RefreshCcw, Bluetooth, Wifi, Usb, Layers, Upload, Search, History, Percent, ArrowRight, Calculator, Armchair, Calendar, RotateCcw } from 'lucide-react';
@@ -52,6 +52,22 @@ const KitchenDisplay = ({ onOpenOrder }: { onOpenOrder: (order: Order) => void }
     const handleCancelOrder = (order: Order) => {
         if (confirm(`ต้องการยกเลิกออเดอร์ ${order.orderNumber} ใช่หรือไม่?`)) {
             dataService.updateOrderStatus(order.id, OrderStatus.CANCELLED);
+            if (isSupabaseConfigured) {
+                updateOrderStatusRemote(order.id, OrderStatus.CANCELLED).catch(() => {
+                    alert('อัปเดตสถานะบนระบบออนไลน์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+                });
+            }
+            setSelectedOrderId(null);
+        }
+    };
+    const handleClearOrder = (order: Order) => {
+        if (confirm(`ต้องการเคลียร์ออเดอร์โต๊ะนี้ (${order.orderNumber}) ใช่หรือไม่?`)) {
+            dataService.updateOrderStatus(order.id, OrderStatus.COMPLETED);
+            if (isSupabaseConfigured) {
+                updateOrderStatusRemote(order.id, OrderStatus.COMPLETED).catch(() => {
+                    alert('อัปเดตสถานะบนระบบออนไลน์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+                });
+            }
             setSelectedOrderId(null);
         }
     };
@@ -217,6 +233,12 @@ const KitchenDisplay = ({ onOpenOrder }: { onOpenOrder: (order: Order) => void }
                                     className="bg-red-50 border border-red-200 text-red-600 px-6 py-3 rounded-lg font-bold shadow-sm hover:bg-red-100"
                                 >
                                     ยกเลิกออเดอร์
+                                </button>
+                                <button
+                                    onClick={() => handleClearOrder(selectedOrder)}
+                                    className="bg-slate-900 border border-slate-900 text-white px-6 py-3 rounded-lg font-bold shadow-sm hover:bg-slate-800"
+                                >
+                                    เคลียร์ออเดอร์
                                 </button>
                                 <button
                                     onClick={() => onOpenOrder(selectedOrder)}
