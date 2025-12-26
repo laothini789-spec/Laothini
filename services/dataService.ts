@@ -340,6 +340,46 @@ class DataService {
         }
     }
 
+    setOrdersFromExternal(externalOrders: Order[]) {
+        const normalized = externalOrders.map(order => ({
+            ...order,
+            createdAt: new Date(order.createdAt)
+        }));
+        this.orders = normalized;
+
+        const activeByTable = new Map<string, Order>();
+        normalized.forEach(order => {
+            if (!order.tableId) return;
+            if (order.status === OrderStatus.COMPLETED || order.status === OrderStatus.CANCELLED) return;
+            const existing = activeByTable.get(order.tableId);
+            if (!existing || new Date(order.createdAt).getTime() > new Date(existing.createdAt).getTime()) {
+                activeByTable.set(order.tableId, order);
+            }
+        });
+
+        this.tables = this.tables.map(table => {
+            const activeOrder = activeByTable.get(table.id);
+            if (activeOrder) {
+                return {
+                    ...table,
+                    status: 'OCCUPIED',
+                    currentOrderId: activeOrder.id
+                };
+            }
+            if (table.status === 'OCCUPIED') {
+                return {
+                    ...table,
+                    status: 'AVAILABLE',
+                    currentOrderId: undefined
+                };
+            }
+            return {
+                ...table,
+                currentOrderId: undefined
+            };
+        });
+    }
+
     // --- Tables ---
     getTables() { return this.tables; }
     getTable(id: string) { return this.tables.find(t => t.id === id); }

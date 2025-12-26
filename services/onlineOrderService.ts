@@ -24,6 +24,18 @@ type DbOrder = {
     payment_method?: PaymentMethod | null;
 };
 
+type DbOrderItem = {
+    id: string;
+    order_id: string;
+    product_id: string;
+    product_name: string;
+    quantity: number;
+    price: number;
+    status: 'PENDING' | 'COOKING' | 'DONE';
+    notes?: string | null;
+    selected_options?: OrderItem['selectedOptions'];
+};
+
 const requireSupabase = () => {
     if (!isSupabaseConfigured || !supabase) {
         throw new Error('Supabase not configured');
@@ -53,6 +65,17 @@ const mapOrder = (order: DbOrder): Order => ({
     createdAt: new Date(order.created_at),
     paymentMethod: order.payment_method || undefined,
     items: []
+});
+
+const mapOrderItem = (item: DbOrderItem): OrderItem => ({
+    id: item.id,
+    productId: item.product_id,
+    productName: item.product_name,
+    quantity: item.quantity,
+    price: item.price,
+    status: item.status || 'PENDING',
+    notes: item.notes || undefined,
+    selectedOptions: item.selected_options || []
 });
 
 export const getTableById = async (tableId: string) => {
@@ -152,6 +175,24 @@ export const appendOrderItems = async (orderId: string, items: OrderItem[], tota
         })
         .eq('id', orderId);
     if (error) throw error;
+};
+
+export const getRecentOrdersWithItems = async (limit = 100) => {
+    const client = requireSupabase();
+    const { data, error } = await client
+        .from('orders')
+        .select('*, order_items(*)')
+        .order('created_at', { ascending: false })
+        .limit(limit);
+    if (error) throw error;
+
+    return (data || []).map((row: any) => {
+        const order = mapOrder(row as DbOrder);
+        const items = Array.isArray(row.order_items)
+            ? row.order_items.map((item: DbOrderItem) => mapOrderItem(item))
+            : [];
+        return { ...order, items };
+    });
 };
 
 export const subscribeToOrderStatus = (orderId: string, onUpdate: (status: OrderStatus) => void) => {

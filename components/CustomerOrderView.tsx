@@ -295,7 +295,7 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({ tableId, t
                     id: `ord_${now}`,
                     orderNumber: `QR-${now.toString().slice(-6)}`,
                     type: OrderType.DINE_IN,
-                    status: OrderStatus.PENDING,
+                    status: OrderStatus.CONFIRMED,
                     items: cart,
                     subtotal: totals.subtotal,
                     tax: totals.tax,
@@ -306,7 +306,7 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({ tableId, t
                 };
                 const createdId = await createOrder(newOrder, cart);
                 setCart([]);
-                setSuccessMessage('ส่งออเดอร์เรียบร้อย รอพนักงานยืนยัน');
+                setSuccessMessage('ส่งออเดอร์เรียบร้อย เข้าระบบทันที');
                 setLastOrderId(createdId);
                 setCurrentTableOrderId(createdId);
                 setIsSubmitting(false);
@@ -335,7 +335,7 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({ tableId, t
                 id: `ord_${now}`,
                 orderNumber: `QR-${now.toString().slice(-6)}`,
                 type: OrderType.DINE_IN,
-                status: OrderStatus.PENDING,
+                status: OrderStatus.CONFIRMED,
                 items: cart,
                 subtotal: totals.subtotal,
                 tax: totals.tax,
@@ -346,7 +346,7 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({ tableId, t
             };
             dataService.createOrder(newOrder);
             setCart([]);
-            setSuccessMessage('ส่งออเดอร์เรียบร้อย รอพนักงานยืนยัน');
+            setSuccessMessage('ส่งออเดอร์เรียบร้อย เข้าระบบทันที');
             setLastOrderId(newOrder.id);
         } catch (err) {
             setSuccessMessage('ส่งออเดอร์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');

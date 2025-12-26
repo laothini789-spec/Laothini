@@ -5,6 +5,7 @@ import { Dashboard } from './components/Dashboard';
 import { MenuView } from './components/MenuView';
 import { CustomerOrderView } from './components/CustomerOrderView';
 import { dataService } from './services/dataService';
+import { getRecentOrdersWithItems } from './services/onlineOrderService';
 import { supabase, isSupabaseConfigured } from './services/supabaseClient';
 import { Order, OrderItem, OrderStatus, OrderType, Table, Staff, Role, PaymentMethod, Ingredient, PrinterConfig, Category, PrintSettings, TaxSettings, ReceiptConfig, Product, RecipeItem, Shift } from './types';
 import { Bell, ChefHat, Package, Settings as SettingsIcon, Monitor, ScrollText, Users, Lock, Unlock, X, Bike, Clock, Printer, CheckCircle, FileText, Tags, Plus, ShoppingBag, ChevronLeft, UtensilsCrossed, Edit, Trash2, Minus, Save, AlertTriangle, FilePenLine, KeyRound, CheckSquare, Square, CreditCard, Banknote, QrCode, Sliders, RefreshCcw, Bluetooth, Wifi, Usb, Layers, Upload, Search, History, Percent, ArrowRight, Calculator, Armchair, Calendar, RotateCcw } from 'lucide-react';
@@ -1750,11 +1751,15 @@ const TableMap = ({
 
         dataService.updateTable(updatedTable);
         setTables([...dataService.getTables()]); // Refresh
+        void syncTablesToSupabase([updatedTable]);
     };
 
     useEffect(() => {
-        void syncTablesToSupabase(tables);
-    }, [tables]);
+        const interval = setInterval(() => {
+            setTables([...dataService.getTables()]);
+        }, 2000);
+        return () => clearInterval(interval);
+    }, []);
 
     const handleEditTableClick = (e: React.MouseEvent, table: Table) => {
         e.stopPropagation();
@@ -1771,6 +1776,7 @@ const TableMap = ({
         };
         dataService.addTable(newTable);
         setTables([...dataService.getTables()]);
+        void syncTablesToSupabase([newTable]);
         setIsModalOpen(false);
         setNewTableName('');
         setNewTableCapacity(4);
@@ -1788,6 +1794,7 @@ const TableMap = ({
             const updatedTable = { ...editingTable, name: editName, capacity: editCapacity };
             dataService.updateTable(updatedTable);
             setTables([...dataService.getTables()]);
+            void syncTablesToSupabase([updatedTable]);
             setEditingTable(null);
         }
     };
@@ -1797,6 +1804,9 @@ const TableMap = ({
         if (confirm('คุณต้องการลบโต๊ะนี้ใช่หรือไม่? หากลบแล้วข้อมูลออเดอร์ปัจจุบันบนโต๊ะนี้ (ถ้ามี) จะหายไป')) {
             dataService.deleteTable(id);
             setTables([...dataService.getTables()]);
+            if (isSupabaseConfigured && supabase) {
+                void supabase.from('tables').delete().eq('id', id);
+            }
         }
     };
 
@@ -1843,6 +1853,7 @@ const TableMap = ({
             currentOrderId: moveFromTable.currentOrderId
         });
         setTables([...dataService.getTables()]);
+        void syncTablesToSupabase([moveFromTable, { ...targetTable, status: 'OCCUPIED', currentOrderId: moveFromTable.currentOrderId }]);
         setIsMoveModalOpen(false);
         setMoveFromTable(null);
         setMoveToTableId('');
@@ -1855,6 +1866,47 @@ const TableMap = ({
         } else {
             setQrBaseUrl(`${window.location.origin}${window.location.pathname}`);
         }
+    }, []);
+
+    useEffect(() => {
+        const syncTableTokensWithSupabase = async () => {
+            if (!isSupabaseConfigured || !supabase) return;
+            const { data, error } = await supabase
+                .from('tables')
+                .select('id, qr_token');
+            if (error || !data) return;
+
+            const supabaseTokens = new Map<string, string | null>();
+            data.forEach((row: any) => {
+                supabaseTokens.set(row.id, row.qr_token ?? null);
+            });
+
+            const localTables = dataService.getTables();
+            const updates: Table[] = [];
+            const upserts: { id: string; qr_token: string }[] = [];
+
+            localTables.forEach(table => {
+                const remoteToken = supabaseTokens.get(table.id) ?? null;
+                if (remoteToken) {
+                    if (table.qrToken !== remoteToken) {
+                        updates.push({ ...table, qrToken: remoteToken });
+                    }
+                } else if (table.qrToken) {
+                    upserts.push({ id: table.id, qr_token: table.qrToken });
+                }
+            });
+
+            updates.forEach(table => dataService.updateTable(table));
+            if (updates.length > 0) {
+                setTables([...dataService.getTables()]);
+            }
+
+            if (upserts.length > 0) {
+                await supabase.from('tables').upsert(upserts, { onConflict: 'id' });
+            }
+        };
+
+        void syncTableTokensWithSupabase();
     }, []);
 
     const normalizeBaseUrl = (value: string) => {
@@ -3432,6 +3484,28 @@ const App = () => {
         });
         return () => {
             listener.subscription.unsubscribe();
+        };
+    }, []);
+
+    useEffect(() => {
+        if (!isSupabaseConfigured) return;
+        let isMounted = true;
+        const syncOrders = async () => {
+            try {
+                const orders = await getRecentOrdersWithItems(200);
+                if (isMounted) {
+                    dataService.setOrdersFromExternal(orders);
+                }
+            } catch (err) {
+                console.warn('Failed to sync orders from Supabase', err);
+            }
+        };
+
+        syncOrders();
+        const interval = setInterval(syncOrders, 3000);
+        return () => {
+            isMounted = false;
+            clearInterval(interval);
         };
     }, []);
 
