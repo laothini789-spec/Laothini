@@ -52,11 +52,18 @@ create table if not exists order_items (
   selected_options jsonb not null default '[]'::jsonb
 );
 
+create table if not exists app_data (
+  key text primary key,
+  payload jsonb not null,
+  updated_at timestamptz not null default now()
+);
+
 alter table profiles enable row level security;
 alter table staff_pins enable row level security;
 alter table tables enable row level security;
 alter table orders enable row level security;
 alter table order_items enable row level security;
+alter table app_data enable row level security;
 
 create policy "Profiles read own" on profiles
   for select using (auth.uid() = id);
@@ -109,6 +116,12 @@ grant execute on function set_order_status(uuid, text) to anon, authenticated;
 create policy "Tables read all" on tables
   for select using (true);
 
+create policy "Tables insert auth" on tables
+  for insert with check (auth.role() = 'authenticated');
+
+create policy "Tables update auth" on tables
+  for update using (auth.role() = 'authenticated');
+
 create policy "Orders read all" on orders
   for select using (true);
 
@@ -126,3 +139,12 @@ create policy "Order items insert anon" on order_items
 
 create policy "Order items update auth" on order_items
   for update using (auth.role() = 'authenticated');
+
+create policy "App data read all" on app_data
+  for select using (true);
+
+create policy "App data insert anon" on app_data
+  for insert with check (true);
+
+create policy "App data update anon" on app_data
+  for update using (true);

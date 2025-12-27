@@ -12,7 +12,10 @@ const btnPrimaryClassName = "px-5 py-2.5 rounded-lg bg-primary text-white font-m
 const btnSecondaryClassName = "px-4 py-2 rounded-lg bg-white border border-slate-300 text-slate-700 font-medium hover:bg-slate-50 transition-all";
 
 export const MenuView: React.FC = () => {
-    const [activeTab, setActiveTab] = useState<MenuTab>('PRODUCTS');
+    const [activeTab, setActiveTab] = useState<MenuTab>(() => {
+        if (typeof window === 'undefined') return 'PRODUCTS';
+        return (localStorage.getItem('omnipos_menu_active_tab') as MenuTab) || 'PRODUCTS';
+    });
     
     // Data States
     const [products, setProducts] = useState<Product[]>([]);
@@ -23,6 +26,14 @@ export const MenuView: React.FC = () => {
     useEffect(() => {
         loadData();
     }, []);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem('omnipos_menu_active_tab', activeTab);
+        } catch {
+            // Ignore storage errors (e.g. private mode)
+        }
+    }, [activeTab]);
 
     const loadData = () => {
         setProducts([...dataService.getProducts()]);
@@ -76,8 +87,14 @@ const TabButton = ({ active, onClick, icon, label }: any) => (
 
 // 1. PRODUCT MANAGER
 const ProductManager = ({ products, categories, optionGroups, reload }: any) => {
-    const [search, setSearch] = useState('');
-    const [selectedCat, setSelectedCat] = useState('ALL');
+    const [search, setSearch] = useState(() => {
+        if (typeof window === 'undefined') return '';
+        return localStorage.getItem('omnipos_menu_search') || '';
+    });
+    const [selectedCat, setSelectedCat] = useState(() => {
+        if (typeof window === 'undefined') return 'ALL';
+        return localStorage.getItem('omnipos_menu_category') || 'ALL';
+    });
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingItem, setEditingItem] = useState<Product | null>(null);
 
@@ -97,6 +114,15 @@ const ProductManager = ({ products, categories, optionGroups, reload }: any) => 
             reload();
         }
     };
+
+    useEffect(() => {
+        try {
+            localStorage.setItem('omnipos_menu_search', search);
+            localStorage.setItem('omnipos_menu_category', selectedCat);
+        } catch {
+            // Ignore storage errors (e.g. private mode)
+        }
+    }, [search, selectedCat]);
 
     return (
         <div className="h-full flex flex-col">

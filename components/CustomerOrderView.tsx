@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Minus, Plus, ShoppingBag, Trash2 } from 'lucide-react';
 import { dataService } from '../services/dataService';
 import { isSupabaseConfigured } from '../services/supabaseClient';
-import { appendOrderItems, createOrder, getOrderById, getTableById, subscribeToOrderStatus } from '../services/onlineOrderService';
+import { appendOrderItems, createOrder, getOrderById, getTableById, getTableByToken, subscribeToOrderStatus } from '../services/onlineOrderService';
 import { Category, Order, OrderItem, OrderStatus, OrderType, Product, ProductOptionGroup, TaxSettings } from '../types';
 
 interface CustomerOrderViewProps {
@@ -24,6 +24,7 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({ tableId, t
     const [lastOrderStatus, setLastOrderStatus] = useState<OrderStatus | null>(null);
     const [tokenError, setTokenError] = useState<string | null>(null);
     const [currentTableOrderId, setCurrentTableOrderId] = useState<string | null>(null);
+    const [resolvedTableId, setResolvedTableId] = useState<string | null>(tableId ?? null);
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     const [isOptionModalOpen, setIsOptionModalOpen] = useState(false);
@@ -39,6 +40,10 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({ tableId, t
     }, []);
 
     useEffect(() => {
+        setResolvedTableId(tableId ?? null);
+    }, [tableId]);
+
+    useEffect(() => {
         if (!tableId) {
             setTableName(null);
             setTokenError('ไม่พบหมายเลขโต๊ะ');
@@ -48,13 +53,22 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({ tableId, t
             let isMounted = true;
             (async () => {
                 try {
-                    const table = await getTableById(tableId);
+                    let table = await getTableById(tableId);
+                    if (!table && tableToken) {
+                        table = await getTableByToken(tableToken);
+                    }
                     if (!isMounted) return;
                     if (!table) {
                         setTableName(null);
                         setTokenError('ไม่พบโต๊ะนี้ในระบบ');
                         return;
                     }
+                    if (!table.qrToken) {
+                        setTableName(null);
+                        setTokenError('โต๊ะนี้ยังไม่ได้ตั้งค่า QR กรุณาติดต่อพนักงาน');
+                        return;
+                    }
+                    setResolvedTableId(table.id);
                     setTableName(table.name);
                     setCurrentTableOrderId(table.currentOrderId || null);
                     if (table.qrToken && tableToken && table.qrToken !== tableToken) {
@@ -80,6 +94,12 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({ tableId, t
             setTokenError('ไม่พบโต๊ะนี้ในระบบ');
             return;
         }
+        if (!table.qrToken) {
+            setTableName(null);
+            setTokenError('โต๊ะนี้ยังไม่ได้ตั้งค่า QR กรุณาติดต่อพนักงาน');
+            return;
+        }
+        setResolvedTableId(table.id);
         setTableName(table.name);
         setCurrentTableOrderId(table.currentOrderId || null);
         if (table.qrToken && tableToken && table.qrToken !== tableToken) {
@@ -256,7 +276,8 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({ tableId, t
             setSuccessMessage(tokenError);
             return;
         }
-        if (!tableId) {
+        const targetTableId = resolvedTableId || tableId;
+        if (!targetTableId) {
             setSuccessMessage('ไม่พบหมายเลขโต๊ะ');
             return;
         }
@@ -302,7 +323,7 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({ tableId, t
                     discount: 0,
                     total: totals.total,
                     createdAt: new Date(),
-                    tableId: tableId
+                    tableId: targetTableId
                 };
                 const createdId = await createOrder(newOrder, cart);
                 setCart([]);
@@ -313,7 +334,7 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({ tableId, t
                 return;
             }
 
-            const table = dataService.getTable(tableId);
+            const table = dataService.getTable(targetTableId);
             if (!table) {
                 setSuccessMessage('ไม่พบโต๊ะนี้ในระบบ');
                 return;
@@ -342,7 +363,7 @@ export const CustomerOrderView: React.FC<CustomerOrderViewProps> = ({ tableId, t
                 discount: 0,
                 total: totals.total,
                 createdAt: new Date(),
-                tableId: tableId
+                tableId: targetTableId
             };
             dataService.createOrder(newOrder);
             setCart([]);

@@ -34,9 +34,15 @@ export const POSView: React.FC<POSViewProps> = ({
     const [currentTable, setCurrentTable] = useState<Table | undefined>(undefined);
 
     // UI States
-    const [selectedCategory, setSelectedCategory] = useState<string>('');
+    const [selectedCategory, setSelectedCategory] = useState<string>(() => {
+        if (typeof window === 'undefined') return '';
+        return localStorage.getItem('omnipos_pos_category') || '';
+    });
     const [cart, setCart] = useState<OrderItem[]>([]);
-    const [search, setSearch] = useState('');
+    const [search, setSearch] = useState(() => {
+        if (typeof window === 'undefined') return '';
+        return localStorage.getItem('omnipos_pos_search') || '';
+    });
     const [selectedPayment, setSelectedPayment] = useState<PaymentMethod | null>(null);
     const [selectedDiscountId, setSelectedDiscountId] = useState<string | null>(null);
 
@@ -52,9 +58,25 @@ export const POSView: React.FC<POSViewProps> = ({
     useEffect(() => {
         const cats = dataService.getCategories();
         setCategories(cats);
-        if (cats.length > 0) setSelectedCategory(cats[0].id);
+        if (cats.length > 0) {
+            const stored = typeof window !== 'undefined' ? localStorage.getItem('omnipos_pos_category') : null;
+            const fallback = cats[0].id;
+            const resolved = stored && cats.some(c => c.id === stored) ? stored : fallback;
+            setSelectedCategory(resolved);
+        }
         setProducts(dataService.getProducts());
     }, []);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem('omnipos_pos_search', search);
+            if (selectedCategory) {
+                localStorage.setItem('omnipos_pos_category', selectedCategory);
+            }
+        } catch {
+            // Ignore storage errors (e.g. private mode)
+        }
+    }, [search, selectedCategory]);
 
     // Effect to handle Order Loading (Edit Mode or Table Selection)
     useEffect(() => {

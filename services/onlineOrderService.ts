@@ -89,6 +89,17 @@ export const getTableById = async (tableId: string) => {
     return data ? mapTable(data as DbTable) : null;
 };
 
+export const getTableByToken = async (token: string) => {
+    const client = requireSupabase();
+    const { data, error } = await client
+        .from('tables')
+        .select('*')
+        .eq('qr_token', token)
+        .maybeSingle();
+    if (error) throw error;
+    return data ? mapTable(data as DbTable) : null;
+};
+
 export const getOrderById = async (orderId: string) => {
     const client = requireSupabase();
     const { data, error } = await client

@@ -22,6 +22,31 @@ const PERMISSION_OPTIONS = [
     { id: 'access_settings', label: 'ตั้งค่าระบบ', desc: 'จัดการพนักงานและการตั้งค่าร้าน' },
 ];
 
+const DEFAULT_PRINTERS: PrinterConfig[] = [
+    { id: 'p1', name: 'แคชเชียร์หลัก', type: 'NETWORK', address: '192.168.1.200', connected: true, paperSize: '80mm', isCashier: true, isKitchen: false, assignedCategoryIds: [] },
+    { id: 'p2', name: 'ครัวร้อน', type: 'NETWORK', address: '192.168.1.201', connected: true, paperSize: '80mm', isCashier: false, isKitchen: true, assignedCategoryIds: ['cat_1', 'cat_2'] }
+];
+
+const APP_SETTINGS_KEYS = [
+    'settings_receipt',
+    'settings_print',
+    'settings_tax',
+    'settings_inventory',
+    'settings_show_kds',
+    'settings_printers',
+    'settings_qr_base_url'
+];
+
+const saveAppData = async (key: string, payload: unknown) => {
+    if (!isSupabaseConfigured || !supabase) return;
+    const { error } = await supabase
+        .from('app_data')
+        .upsert({ key, payload, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+    if (error) {
+        console.warn(`Failed to sync ${key} to Supabase`, error);
+    }
+};
+
 // --- KITCHEN DISPLAY COMPONENT ---
 const KitchenDisplay = ({ onOpenOrder }: { onOpenOrder: (order: Order) => void }) => {
     const [orders, setOrders] = useState<Order[]>([]);
@@ -657,10 +682,23 @@ const DeliveryView = () => {
 const HistoryView = () => {
     const [orders, setOrders] = useState<Order[]>([]);
     const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
-    const [searchTerm, setSearchTerm] = useState('');
-    const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
-    const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
-    const [filterType, setFilterType] = useState<'ALL' | 'DINE_IN' | 'TAKEAWAY' | 'DELIVERY'>('ALL');
+    const todayStr = new Date().toISOString().split('T')[0];
+    const [searchTerm, setSearchTerm] = useState(() => {
+        if (typeof window === 'undefined') return '';
+        return localStorage.getItem('omnipos_history_search') || '';
+    });
+    const [startDate, setStartDate] = useState(() => {
+        if (typeof window === 'undefined') return todayStr;
+        return localStorage.getItem('omnipos_history_start_date') || todayStr;
+    });
+    const [endDate, setEndDate] = useState(() => {
+        if (typeof window === 'undefined') return todayStr;
+        return localStorage.getItem('omnipos_history_end_date') || todayStr;
+    });
+    const [filterType, setFilterType] = useState<'ALL' | 'DINE_IN' | 'TAKEAWAY' | 'DELIVERY'>(() => {
+        if (typeof window === 'undefined') return 'ALL';
+        return (localStorage.getItem('omnipos_history_filter') as any) || 'ALL';
+    });
 
     const refreshOrders = () => {
         const allOrders = dataService.getOrders();
@@ -674,6 +712,17 @@ const HistoryView = () => {
     useEffect(() => {
         refreshOrders();
     }, []);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem('omnipos_history_search', searchTerm);
+            localStorage.setItem('omnipos_history_start_date', startDate);
+            localStorage.setItem('omnipos_history_end_date', endDate);
+            localStorage.setItem('omnipos_history_filter', filterType);
+        } catch {
+            // Ignore storage errors (e.g. private mode)
+        }
+    }, [searchTerm, startDate, endDate, filterType]);
 
     const filteredOrders = orders.filter(o => {
         const matchesSearch = o.orderNumber.toLowerCase().includes(searchTerm.toLowerCase());
@@ -693,6 +742,11 @@ const HistoryView = () => {
     const handleVoidOrder = (order: Order) => {
         if (confirm(`ต้องการยกเลิกบิล ${order.orderNumber} ใช่หรือไม่? การยกเลิกจะไม่คืนสต็อกอัตโนมัติ`)) {
             dataService.updateOrderStatus(order.id, OrderStatus.CANCELLED);
+            if (isSupabaseConfigured) {
+                updateOrderStatusRemote(order.id, OrderStatus.CANCELLED).catch(() => {
+                    alert('อัปเดตสถานะบนระบบออนไลน์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+                });
+            }
             refreshOrders();
             if (selectedOrder?.id === order.id) {
                 setSelectedOrder(prev => prev ? { ...prev, status: OrderStatus.CANCELLED } : null);
@@ -1720,12 +1774,16 @@ const TableMap = ({
     onSelectTable,
     onTabChange,
     onTakeaway,
-    onDeliveryStart
+    onDeliveryStart,
+    qrBaseUrl,
+    setQrBaseUrl
 }: {
     onSelectTable: (id: string) => void,
     onTabChange: (tab: string) => void,
     onTakeaway: () => void,
-    onDeliveryStart: (platform: string, orderRef?: string) => void
+    onDeliveryStart: (platform: string, orderRef?: string) => void,
+    qrBaseUrl: string,
+    setQrBaseUrl: React.Dispatch<React.SetStateAction<string>>
 }) => {
     const [tables, setTables] = useState(dataService.getTables());
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -1734,7 +1792,6 @@ const TableMap = ({
     const [qrTable, setQrTable] = useState<Table | null>(null);
     const [qrTimestamp, setQrTimestamp] = useState<Date | null>(null);
     const [isQrSettingsOpen, setIsQrSettingsOpen] = useState(false);
-    const [qrBaseUrl, setQrBaseUrl] = useState('');
     const [isMoveModalOpen, setIsMoveModalOpen] = useState(false);
     const [moveFromTable, setMoveFromTable] = useState<Table | null>(null);
     const [moveToTableId, setMoveToTableId] = useState<string>('');
@@ -1769,6 +1826,17 @@ const TableMap = ({
         const updatedTable = { ...table, status: newStatus };
         if (newStatus === 'AVAILABLE') {
             updatedTable.currentOrderId = undefined;
+            if (table.currentOrderId) {
+                const existingOrder = dataService.getOrder(table.currentOrderId);
+                if (existingOrder && existingOrder.status !== OrderStatus.CANCELLED && existingOrder.status !== OrderStatus.COMPLETED) {
+                    dataService.updateOrderStatus(table.currentOrderId, OrderStatus.COMPLETED);
+                    if (isSupabaseConfigured) {
+                        updateOrderStatusRemote(table.currentOrderId, OrderStatus.COMPLETED).catch(() => {
+                            alert('อัปเดตสถานะบนระบบออนไลน์ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+                        });
+                    }
+                }
+            }
         }
 
         dataService.updateTable(updatedTable);
@@ -1781,6 +1849,39 @@ const TableMap = ({
             setTables([...dataService.getTables()]);
         }, 2000);
         return () => clearInterval(interval);
+    }, []);
+
+    useEffect(() => {
+        if (!isSupabaseConfigured || !supabase) return;
+        let isMounted = true;
+        const fetchTables = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('tables')
+                    .select('*');
+                if (error || !data) return;
+                const remoteTables = data.map((row: any) => ({
+                    id: row.id,
+                    name: row.name,
+                    status: row.status || 'AVAILABLE',
+                    capacity: row.capacity ?? 1,
+                    currentOrderId: row.current_order_id || undefined,
+                    qrToken: row.qr_token || undefined
+                }));
+                dataService.setTablesFromExternal(remoteTables);
+                if (isMounted) {
+                    setTables([...dataService.getTables()]);
+                }
+            } catch {
+                // Ignore fetch errors; will retry
+            }
+        };
+        fetchTables();
+        const interval = setInterval(fetchTables, 3000);
+        return () => {
+            isMounted = false;
+            clearInterval(interval);
+        };
     }, []);
 
     const handleEditTableClick = (e: React.MouseEvent, table: Table) => {
@@ -1882,17 +1983,9 @@ const TableMap = ({
     };
 
     useEffect(() => {
-        const savedBaseUrl = localStorage.getItem('omnipos_qr_base_url');
-        if (savedBaseUrl) {
-            setQrBaseUrl(savedBaseUrl);
-        } else {
-            setQrBaseUrl(`${window.location.origin}${window.location.pathname}`);
-        }
-    }, []);
-
-    useEffect(() => {
         const syncTableTokensWithSupabase = async () => {
             if (!isSupabaseConfigured || !supabase) return;
+            dataService.ensureTableTokens();
             const { data, error } = await supabase
                 .from('tables')
                 .select('id, qr_token');
@@ -1926,6 +2019,9 @@ const TableMap = ({
             if (upserts.length > 0) {
                 await supabase.from('tables').upsert(upserts, { onConflict: 'id' });
             }
+
+            const tablesForSync = dataService.getTables();
+            await syncTablesToSupabase(tablesForSync);
         };
 
         void syncTableTokensWithSupabase();
@@ -1983,10 +2079,12 @@ const TableMap = ({
 
     const handleOpenQr = (e: React.MouseEvent, table: Table) => {
         e.stopPropagation();
-        setQrTable(table);
+        dataService.ensureTableTokens();
+        const updatedTable = dataService.getTable(table.id) || table;
+        setQrTable(updatedTable);
         setIsQrModalOpen(true);
         setQrTimestamp(new Date());
-        void syncTablesToSupabase([table]);
+        void syncTablesToSupabase([updatedTable]);
     };
 
     const handlePrintQr = () => {
@@ -2037,14 +2135,16 @@ const TableMap = ({
 
     const handlePrintAllQr = () => {
         if (tables.length === 0) return;
+        const updatedTables = dataService.ensureTableTokens();
+        setTables([...updatedTables]);
         const printedAt = new Date();
         const printWindow = window.open('', '_blank', 'width=520,height=720');
         if (!printWindow) {
             alert('ไม่สามารถเปิดหน้าพิมพ์ได้ กรุณาอนุญาต pop-up');
             return;
         }
-        void syncTablesToSupabase(tables);
-        const receiptsHtml = tables.map(table => {
+        void syncTablesToSupabase(updatedTables);
+        const receiptsHtml = updatedTables.map(table => {
             const orderUrl = buildTableOrderUrl(table.id);
             const qrImage = getQrImageUrl(table.id);
             const escapedTableName = escapeHtml(table.name);
@@ -2096,7 +2196,6 @@ const TableMap = ({
             alert('กรุณากรอก URL ให้ถูกต้อง');
             return;
         }
-        localStorage.setItem('omnipos_qr_base_url', normalized);
         setQrBaseUrl(normalized);
         setIsQrSettingsOpen(false);
     };
@@ -2622,7 +2721,9 @@ const SettingsView = ({
     taxSettings,
     setTaxSettings,
     inventorySettings,
-    setInventorySettings
+    setInventorySettings,
+    printers,
+    setPrinters
 }: {
     enableKDS: boolean,
     setEnableKDS: (val: boolean) => void,
@@ -2634,9 +2735,14 @@ const SettingsView = ({
     taxSettings: TaxSettings,
     setTaxSettings: React.Dispatch<React.SetStateAction<TaxSettings>>,
     inventorySettings: { enabled: boolean; lowStockThreshold: number; },
-    setInventorySettings: React.Dispatch<React.SetStateAction<{ enabled: boolean; lowStockThreshold: number; }>>
+    setInventorySettings: React.Dispatch<React.SetStateAction<{ enabled: boolean; lowStockThreshold: number; }>>,
+    printers: PrinterConfig[],
+    setPrinters: React.Dispatch<React.SetStateAction<PrinterConfig[]>>
 }) => {
-    const [activeMenu, setActiveMenu] = useState('STAFF');
+    const [activeMenu, setActiveMenu] = useState(() => {
+        if (typeof window === 'undefined') return 'STAFF';
+        return localStorage.getItem('omnipos_settings_active_menu') || 'STAFF';
+    });
     const [staffList, setStaffList] = useState(dataService.getAllStaff());
     const [isStaffModalOpen, setIsStaffModalOpen] = useState(false);
     const [editingStaff, setEditingStaff] = useState<Staff | null>(null);
@@ -2645,11 +2751,6 @@ const SettingsView = ({
     const logoInputRef = useRef<HTMLInputElement>(null);
     const footerInputRef = useRef<HTMLInputElement>(null);
 
-    // Printer State
-    const [printers, setPrinters] = useState<PrinterConfig[]>([
-        { id: 'p1', name: 'แคชเชียร์หลัก', type: 'NETWORK', address: '192.168.1.200', connected: true, paperSize: '80mm', isCashier: true, isKitchen: false, assignedCategoryIds: [] },
-        { id: 'p2', name: 'ครัวร้อน', type: 'NETWORK', address: '192.168.1.201', connected: true, paperSize: '80mm', isCashier: false, isKitchen: true, assignedCategoryIds: ['cat_1', 'cat_2'] }
-    ]);
     const [isPrinterModalOpen, setIsPrinterModalOpen] = useState(false);
     const [editingPrinter, setEditingPrinter] = useState<PrinterConfig | null>(null);
 
@@ -2709,6 +2810,14 @@ const SettingsView = ({
         { id: 'RECEIPT', label: 'รูปแบบใบเสร็จ (Receipt)' },
         { id: 'PRINTER', label: 'เครื่องพิมพ์ (Printer)' },
     ];
+
+    useEffect(() => {
+        try {
+            localStorage.setItem('omnipos_settings_active_menu', activeMenu);
+        } catch {
+            // Ignore storage errors (e.g. private mode)
+        }
+    }, [activeMenu]);
 
     return (
         <div className="flex h-full bg-slate-50 overflow-hidden">
@@ -3374,35 +3483,172 @@ const ShiftModal = ({
 };
 
 const App = () => {
-    const [currentTab, setCurrentTab] = useState('pos');
+    const [currentTab, setCurrentTab] = useState(() => {
+        if (typeof window === 'undefined') return 'pos';
+        return localStorage.getItem('omnipos_current_tab') || 'pos';
+    });
     const [currentUser, setCurrentUser] = useState<Staff | null>(null);
     const [isPinLoginOpen, setIsPinLoginOpen] = useState(false);
-    const [showKDS, setShowKDS] = useState(false);
-    const [receiptConfig, setReceiptConfig] = useState<ReceiptConfig>({
+    const [showKDS, setShowKDS] = useState(() => {
+        if (typeof window === 'undefined') return false;
+        try {
+            const raw = localStorage.getItem('omnipos_show_kds');
+            return raw ? JSON.parse(raw) : false;
+        } catch {
+            return false;
+        }
+    });
+    const [isDataReady, setIsDataReady] = useState(!isSupabaseConfigured);
+    const [settingsSyncReady, setSettingsSyncReady] = useState(!isSupabaseConfigured);
+    const defaultReceiptConfig: ReceiptConfig = {
         logoUrl: '',
         footerImageUrl: '',
         headerText: 'ร้านอาหาร Laothini',
         footerText: 'ขอบคุณที่ใช้บริการ',
         address: '123 ถนนสุขุมวิท, กรุงเทพมหานคร\nโทร: 02-123-4567'
+    };
+    const [receiptConfig, setReceiptConfig] = useState<ReceiptConfig>(() => {
+        if (typeof window === 'undefined') return defaultReceiptConfig;
+        try {
+            const raw = localStorage.getItem('omnipos_receipt_config');
+            return raw ? { ...defaultReceiptConfig, ...JSON.parse(raw) } : defaultReceiptConfig;
+        } catch {
+            return defaultReceiptConfig;
+        }
     });
-    const [printSettings, setPrintSettings] = useState<PrintSettings>({
+    const defaultPrintSettings: PrintSettings = {
         autoPrintReceipt: true,
         autoPrintKitchen: true,
         openCashDrawer: true
+    };
+    const [printSettings, setPrintSettings] = useState<PrintSettings>(() => {
+        if (typeof window === 'undefined') return defaultPrintSettings;
+        try {
+            const raw = localStorage.getItem('omnipos_print_settings');
+            return raw ? { ...defaultPrintSettings, ...JSON.parse(raw) } : defaultPrintSettings;
+        } catch {
+            return defaultPrintSettings;
+        }
     });
 
     // Tax Settings State
-    const [taxSettings, setTaxSettings] = useState<TaxSettings>({
+    const defaultTaxSettings: TaxSettings = {
         enabled: true,
         rate: 7,
         label: 'ภาษี (VAT)'
+    };
+    const [taxSettings, setTaxSettings] = useState<TaxSettings>(() => {
+        if (typeof window === 'undefined') return defaultTaxSettings;
+        try {
+            const raw = localStorage.getItem('omnipos_tax_settings');
+            return raw ? { ...defaultTaxSettings, ...JSON.parse(raw) } : defaultTaxSettings;
+        } catch {
+            return defaultTaxSettings;
+        }
     });
 
     // Inventory Settings State
-    const [inventorySettings, setInventorySettings] = useState<{ enabled: boolean; lowStockThreshold: number; }>({
-        enabled: true,
-        lowStockThreshold: 20
+    const defaultInventorySettings = { enabled: true, lowStockThreshold: 20 };
+    const [inventorySettings, setInventorySettings] = useState<{ enabled: boolean; lowStockThreshold: number; }>(() => {
+        if (typeof window === 'undefined') return defaultInventorySettings;
+        try {
+            const raw = localStorage.getItem('omnipos_inventory_settings');
+            return raw ? { ...defaultInventorySettings, ...JSON.parse(raw) } : defaultInventorySettings;
+        } catch {
+            return defaultInventorySettings;
+        }
     });
+    const [printers, setPrinters] = useState<PrinterConfig[]>(() => {
+        if (typeof window === 'undefined') return DEFAULT_PRINTERS;
+        try {
+            const raw = localStorage.getItem('omnipos_printers');
+            if (!raw) return DEFAULT_PRINTERS;
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed) ? parsed : DEFAULT_PRINTERS;
+        } catch {
+            return DEFAULT_PRINTERS;
+        }
+    });
+    const [qrBaseUrl, setQrBaseUrl] = useState(() => {
+        if (typeof window === 'undefined') return '';
+        const savedBaseUrl = localStorage.getItem('omnipos_qr_base_url');
+        return savedBaseUrl || `${window.location.origin}${window.location.pathname}`;
+    });
+
+    useEffect(() => {
+        if (!isSupabaseConfigured) return;
+        let isMounted = true;
+        const hydrateSettings = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('app_data')
+                    .select('key,payload')
+                    .in('key', APP_SETTINGS_KEYS);
+                if (error) {
+                    console.warn('Failed to load settings from Supabase', error);
+                    return;
+                }
+                const byKey = new Map<string, any>();
+                (data || []).forEach(row => {
+                    byKey.set(row.key, row.payload);
+                });
+                if (byKey.has('settings_receipt')) {
+                    const payload = byKey.get('settings_receipt');
+                    if (payload && typeof payload === 'object') {
+                        setReceiptConfig({ ...defaultReceiptConfig, ...payload });
+                    }
+                }
+                if (byKey.has('settings_print')) {
+                    const payload = byKey.get('settings_print');
+                    if (payload && typeof payload === 'object') {
+                        setPrintSettings({ ...defaultPrintSettings, ...payload });
+                    }
+                }
+                if (byKey.has('settings_tax')) {
+                    const payload = byKey.get('settings_tax');
+                    if (payload && typeof payload === 'object') {
+                        setTaxSettings({ ...defaultTaxSettings, ...payload });
+                    }
+                }
+                if (byKey.has('settings_inventory')) {
+                    const payload = byKey.get('settings_inventory');
+                    if (payload && typeof payload === 'object') {
+                        setInventorySettings({ ...defaultInventorySettings, ...payload });
+                    }
+                }
+                if (byKey.has('settings_show_kds')) {
+                    const payload = byKey.get('settings_show_kds');
+                    if (typeof payload === 'boolean') {
+                        setShowKDS(payload);
+                    }
+                }
+                if (byKey.has('settings_printers')) {
+                    const payload = byKey.get('settings_printers');
+                    if (Array.isArray(payload)) {
+                        setPrinters(payload);
+                    }
+                }
+                if (byKey.has('settings_qr_base_url')) {
+                    const payload = byKey.get('settings_qr_base_url');
+                    if (typeof payload === 'string' && payload.trim()) {
+                        setQrBaseUrl(payload);
+                    }
+                }
+            } catch (err) {
+                console.warn('Failed to hydrate settings from Supabase', err);
+            }
+        };
+
+        Promise.all([dataService.hydrateFromSupabase(), hydrateSettings()]).finally(() => {
+            if (!isMounted) return;
+            setSettingsSyncReady(true);
+            setIsDataReady(true);
+        });
+
+        return () => {
+            isMounted = false;
+        };
+    }, []);
 
     const searchParams = new URLSearchParams(window.location.search);
     const customerTableId = searchParams.get('table') || searchParams.get('tableId');
@@ -3434,6 +3680,14 @@ const App = () => {
         }
     }, [currentUser]);
 
+    useEffect(() => {
+        try {
+            localStorage.setItem('omnipos_current_tab', currentTab);
+        } catch {
+            // Ignore storage errors (e.g. private mode)
+        }
+    }, [currentTab]);
+
     const handleOpenShift = (amount: number, notes?: string) => {
         if (!currentUser) return;
         const newShift = dataService.startShift(currentUser, amount);
@@ -3452,6 +3706,83 @@ const App = () => {
     // Manager Verification State
     const [isVerifyManagerOpen, setIsVerifyManagerOpen] = useState(false);
     const [verifyManagerCallback, setVerifyManagerCallback] = useState<(() => void) | null>(null);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem('omnipos_receipt_config', JSON.stringify(receiptConfig));
+            if (settingsSyncReady) {
+                void saveAppData('settings_receipt', receiptConfig);
+            }
+        } catch {
+            // Ignore storage errors (e.g. private mode)
+        }
+    }, [receiptConfig, settingsSyncReady]);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem('omnipos_print_settings', JSON.stringify(printSettings));
+            if (settingsSyncReady) {
+                void saveAppData('settings_print', printSettings);
+            }
+        } catch {
+            // Ignore storage errors (e.g. private mode)
+        }
+    }, [printSettings, settingsSyncReady]);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem('omnipos_tax_settings', JSON.stringify(taxSettings));
+            if (settingsSyncReady) {
+                void saveAppData('settings_tax', taxSettings);
+            }
+        } catch {
+            // Ignore storage errors (e.g. private mode)
+        }
+    }, [taxSettings, settingsSyncReady]);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem('omnipos_inventory_settings', JSON.stringify(inventorySettings));
+            if (settingsSyncReady) {
+                void saveAppData('settings_inventory', inventorySettings);
+            }
+        } catch {
+            // Ignore storage errors (e.g. private mode)
+        }
+    }, [inventorySettings, settingsSyncReady]);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem('omnipos_show_kds', JSON.stringify(showKDS));
+            if (settingsSyncReady) {
+                void saveAppData('settings_show_kds', showKDS);
+            }
+        } catch {
+            // Ignore storage errors (e.g. private mode)
+        }
+    }, [showKDS, settingsSyncReady]);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem('omnipos_printers', JSON.stringify(printers));
+            if (settingsSyncReady) {
+                void saveAppData('settings_printers', printers);
+            }
+        } catch {
+            // Ignore storage errors (e.g. private mode)
+        }
+    }, [printers, settingsSyncReady]);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem('omnipos_qr_base_url', qrBaseUrl);
+            if (settingsSyncReady) {
+                void saveAppData('settings_qr_base_url', qrBaseUrl);
+            }
+        } catch {
+            // Ignore storage errors (e.g. private mode)
+        }
+    }, [qrBaseUrl, settingsSyncReady]);
 
     const handleLogin = (staff: Staff) => {
         setCurrentUser(staff);
@@ -3659,6 +3990,17 @@ const App = () => {
         setVerifyManagerCallback(null);
     };
 
+    if (!isDataReady) {
+        return (
+            <div className="h-screen w-screen flex items-center justify-center bg-slate-900 text-white">
+                <div className="flex flex-col items-center gap-3">
+                    <div className="h-10 w-10 rounded-full border-4 border-white/20 border-t-white animate-spin"></div>
+                    <p className="text-sm tracking-wide text-white/80">กำลังโหลดข้อมูลจากระบบกลาง...</p>
+                </div>
+            </div>
+        );
+    }
+
     if (isCustomerMode) {
         return (
             <CustomerOrderView
@@ -3700,7 +4042,7 @@ const App = () => {
     }
 
     return (
-        <div className="flex h-screen bg-slate-900 font-kanit overflow-hidden">
+        <div className="flex flex-col lg:flex-row h-screen bg-slate-900 font-kanit overflow-hidden">
             <Sidebar
                 currentTab={currentTab}
                 setTab={(tab) => {
@@ -3723,7 +4065,7 @@ const App = () => {
                 }}
             />
 
-            <main className="flex-1 bg-slate-100 rounded-l-3xl overflow-hidden shadow-2xl relative">
+            <main className="flex-1 bg-slate-100 rounded-l-3xl overflow-hidden shadow-2xl relative pb-20 lg:pb-0">
                 <PinModal
                     isOpen={isVerifyManagerOpen}
                     onClose={() => setIsVerifyManagerOpen(false)}
@@ -3738,6 +4080,8 @@ const App = () => {
                         onTabChange={setCurrentTab}
                         onTakeaway={handleTakeaway}
                         onDeliveryStart={handleDeliveryStart}
+                        qrBaseUrl={qrBaseUrl}
+                        setQrBaseUrl={setQrBaseUrl}
                     />
                 )}
                 {currentTab === 'pos' && (
@@ -3773,6 +4117,8 @@ const App = () => {
                         setTaxSettings={setTaxSettings}
                         inventorySettings={inventorySettings}
                         setInventorySettings={setInventorySettings}
+                        printers={printers}
+                        setPrinters={setPrinters}
                     />
                 )}
 

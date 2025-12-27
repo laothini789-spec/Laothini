@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import { TrendingUp, DollarSign, Package, Sparkles, Layers, Percent, Calendar, Download, Clock } from 'lucide-react';
 import { dataService } from '../services/dataService';
@@ -19,10 +19,16 @@ export const Dashboard: React.FC = () => {
     const categories = dataService.getCategories();
     const shifts = dataService.getShifts();
 
-    const [dateRange, setDateRange] = useState<DateRange>('TODAY');
+    const [dateRange, setDateRange] = useState<DateRange>(() => {
+        if (typeof window === 'undefined') return 'TODAY';
+        return (localStorage.getItem('omnipos_dashboard_date_range') as DateRange) || 'TODAY';
+    });
     const [aiReport, setAiReport] = useState<string | null>(null);
     const [loadingAi, setLoadingAi] = useState(false);
-    const [activeReport, setActiveReport] = useState<ReportSectionId>('SUMMARY');
+    const [activeReport, setActiveReport] = useState<ReportSectionId>(() => {
+        if (typeof window === 'undefined') return 'SUMMARY';
+        return (localStorage.getItem('omnipos_dashboard_active_report') as ReportSectionId) || 'SUMMARY';
+    });
 
     const reportSections: { id: ReportSectionId; label: string }[] = [
         { id: 'SUMMARY', label: 'สรุปรายงาน' },
@@ -68,6 +74,22 @@ export const Dashboard: React.FC = () => {
     const totalSales = useMemo(() => filteredOrders.reduce((sum, o) => sum + o.total, 0), [filteredOrders]);
     const totalOrders = filteredOrders.length;
     const avgOrderValue = totalOrders > 0 ? totalSales / totalOrders : 0;
+    const shiftSummary = useMemo(() => {
+        const totals = shifts.reduce((acc, shift) => {
+            acc.totalCash += shift.totalCashSales || 0;
+            acc.totalExpected += shift.expectedCash || 0;
+            acc.totalEnding += shift.endingCash || 0;
+            if (shift.status === 'CLOSED') acc.closedShifts += 1;
+            if (shift.status === 'OPEN') acc.openShifts += 1;
+            return acc;
+        }, { totalCash: 0, totalExpected: 0, totalEnding: 0, closedShifts: 0, openShifts: 0 });
+
+        return {
+            ...totals,
+            totalShifts: shifts.length,
+            totalDifference: totals.totalEnding - totals.totalExpected
+        };
+    }, [shifts]);
 
     // --- CHARTS DATA ---
 
@@ -264,6 +286,15 @@ export const Dashboard: React.FC = () => {
         setLoadingAi(false);
     };
 
+    useEffect(() => {
+        try {
+            localStorage.setItem('omnipos_dashboard_date_range', dateRange);
+            localStorage.setItem('omnipos_dashboard_active_report', activeReport);
+        } catch {
+            // Ignore storage errors (e.g. private mode)
+        }
+    }, [dateRange, activeReport]);
+
     return (
         <div className="p-6 h-full overflow-y-auto bg-slate-50 font-sans">
             {/* Header & Controls */}
@@ -318,9 +349,9 @@ export const Dashboard: React.FC = () => {
                 <>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                         <KPICard
-                            title="ยอดขายรวม (Total Sales)"
-                            value={`฿${totalSales.toLocaleString()}`}
-                            subValue={`${totalOrders} ออเดอร์`}
+                            title="ยอดขายเงินสดจากกะ (All Shifts)"
+                            value={`฿${shiftSummary.totalCash.toLocaleString()}`}
+                            subValue={`กะทั้งหมด ${shiftSummary.totalShifts}`}
                             icon={<DollarSign size={24} />}
                             color="green"
                         />

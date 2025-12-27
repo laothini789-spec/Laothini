@@ -63,9 +63,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, setTab, showKDS, c
     const logoutItem = { id: 'pin', icon: <LogOut size={24} />, label: 'กลับไปสู่หน้า PIN', desc: 'ออกจากระบบ' };
 
     return (
-        <div className="w-20 lg:w-72 bg-slate-900 text-slate-400 flex flex-col h-full shadow-2xl transition-all duration-300 font-kanit z-20">
+        <div className="fixed bottom-0 left-0 right-0 lg:static lg:w-72 w-full bg-slate-900 text-slate-400 flex flex-row lg:flex-col h-16 lg:h-full shadow-2xl transition-all duration-300 font-kanit z-30">
             {/* Header / Logo */}
-            <div className="p-4 flex items-center justify-center lg:justify-start border-b border-slate-800 h-20 flex-shrink-0">
+            <div className="hidden lg:flex p-4 items-center justify-center lg:justify-start border-b border-slate-800 h-20 flex-shrink-0">
                 <div className="w-10 h-10 bg-gradient-to-br from-orange-500 to-red-500 rounded-xl flex items-center justify-center font-bold text-xl text-white shadow-lg">L</div>
                 <div className="hidden lg:block ml-3">
                     <div className="font-bold text-lg text-white leading-none">Laothini</div>
@@ -74,21 +74,21 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, setTab, showKDS, c
             </div>
 
             {/* Navigation List (Scrollable) */}
-            <nav className="flex-1 overflow-y-auto py-4 space-y-1 px-3 custom-scrollbar">
+            <nav className="flex-1 flex items-center justify-around lg:justify-start lg:flex-col overflow-x-auto lg:overflow-y-auto py-0 lg:py-4 px-2 lg:px-3 custom-scrollbar">
                 {navItems.map((item, index) => {
                     const isActive = currentTab === item.id;
                     return (
                         <button
                             key={item.id}
                             onClick={() => setTab(item.id)}
-                            className={`w-full flex items-center p-3 rounded-xl transition-all relative group mb-1
+                            className={`w-full lg:w-full flex flex-col lg:flex-row items-center p-2 lg:p-3 rounded-xl transition-all relative group lg:mb-1
                                 ${isActive
                                     ? 'bg-slate-800 text-white shadow-md'
                                     : 'hover:bg-slate-800/50 hover:text-white'}`}
                         >
                             {/* Active Indicator */}
                             {isActive && (
-                                <div className="absolute left-0 top-1/2 -translate-y-1/2 h-8 w-1 bg-orange-500 rounded-r-full"></div>
+                                <div className="absolute left-0 top-1/2 -translate-y-1/2 h-8 w-1 bg-orange-500 rounded-r-full hidden lg:block"></div>
                             )}
 
                             {/* Icon */}
@@ -105,13 +105,39 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, setTab, showKDS, c
                                     {item.desc}
                                 </span>
                             </div>
+                            <span className={`lg:hidden text-[10px] mt-1 ${isActive ? 'text-white' : 'text-slate-500 group-hover:text-slate-300'}`}>
+                                {item.label}
+                            </span>
                         </button>
                     );
                 })}
+
+                {currentUser && (
+                    <button
+                        onClick={onToggleShift}
+                        className={`lg:hidden flex flex-col items-center p-2 rounded-xl transition-all ${currentShift ? 'bg-slate-800/50 text-red-300' : 'bg-green-500/10 text-green-300'}`}
+                        title={currentShift ? "ปิดกะ (Close Shift)" : "เปิดกะ (Open Shift)"}
+                    >
+                        <span className="flex-shrink-0">
+                            {currentShift ? <Lock size={20} /> : <Unlock size={20} />}
+                        </span>
+                        <span className="text-[10px] mt-1">
+                            {currentShift ? 'ปิดกะ' : 'เปิดกะ'}
+                        </span>
+                    </button>
+                )}
+
+                <button
+                    onClick={() => setTab(logoutItem.id)}
+                    className="lg:hidden flex flex-col items-center p-2 rounded-xl hover:bg-red-900/20 hover:text-red-300 text-slate-500 transition-all group"
+                >
+                    <span className="flex-shrink-0">{logoutItem.icon}</span>
+                    <span className="text-[10px] mt-1">{logoutItem.label}</span>
+                </button>
             </nav>
 
             {/* Footer Actions */}
-            <div className="p-4 border-t border-slate-800 space-y-2">
+            <div className="hidden lg:block p-4 border-t border-slate-800 space-y-2">
                 {/* Shift Button */}
                 {currentUser && (
                     <button

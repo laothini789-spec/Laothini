@@ -149,6 +149,7 @@ omnipos/
 5. ดีพลอยด้วย `netlify.toml` (Build: `npm run build`, Publish: `dist`)
 
 หมายเหตุ:
+- ตาราง `app_data` ใช้เก็บเมนู/หมวดหมู่/ส่วนลด/วัตถุดิบ/พนักงาน/กะงาน รวมถึงการตั้งค่าระบบ (ภาษี/ใบเสร็จ/ปริ้นเตอร์/KDS/QR base URL) เพื่อซิงก์ข้ามอุปกรณ์
 - เมื่อพิมพ์ QR ในหน้าแผนผังโต๊ะ ระบบจะ sync โต๊ะ/โทเคนไปที่ Supabase อัตโนมัติ
 - ตัวอย่างนโยบาย RLS ใน `supabase/schema.sql` เปิดให้ลูกค้า insert ออเดอร์ได้แบบสาธารณะเพื่อเดโม หากใช้จริงควรเพิ่มการตรวจสอบโทเคน/Rate limit ฝั่งเซิร์ฟเวอร์
 - ตั้งค่า Gemini API Key สำหรับ Edge Function ที่ Supabase (Project Settings → Functions → Secrets): `GEMINI_API_KEY`
