@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { POSView } from './components/POSView';
 import { Dashboard } from './components/Dashboard';
@@ -1812,6 +1812,19 @@ const TableMap = ({
     const [editName, setEditName] = useState('');
     const [editCapacity, setEditCapacity] = useState(0);
 
+    const sortedTables = useMemo(() => {
+        const extractNumber = (name: string) => {
+            const match = name.match(/\d+/);
+            return match ? Number(match[0]) : Number.MAX_SAFE_INTEGER;
+        };
+        return [...tables].sort((a, b) => {
+            const aNum = extractNumber(a.name);
+            const bNum = extractNumber(b.name);
+            if (aNum !== bNum) return aNum - bNum;
+            return a.name.localeCompare(b.name, 'th-TH');
+        });
+    }, [tables]);
+
     // Table Actions
     const handleUpdateTableStatus = (e: React.MouseEvent, table: Table, newStatus: 'AVAILABLE' | 'OCCUPIED' | 'RESERVED') => {
         e.stopPropagation();
@@ -1922,14 +1935,18 @@ const TableMap = ({
         }
     };
 
-    const handleDeleteTable = (e: React.MouseEvent, id: string) => {
+    const handleDeleteTable = async (e: React.MouseEvent, id: string) => {
         e.stopPropagation();
         if (confirm('คุณต้องการลบโต๊ะนี้ใช่หรือไม่? หากลบแล้วข้อมูลออเดอร์ปัจจุบันบนโต๊ะนี้ (ถ้ามี) จะหายไป')) {
+            if (isSupabaseConfigured && supabase) {
+                const { error } = await supabase.from('tables').delete().eq('id', id);
+                if (error) {
+                    alert('ลบโต๊ะไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+                    return;
+                }
+            }
             dataService.deleteTable(id);
             setTables([...dataService.getTables()]);
-            if (isSupabaseConfigured && supabase) {
-                void supabase.from('tables').delete().eq('id', id);
-            }
         }
     };
 
@@ -2273,7 +2290,7 @@ const TableMap = ({
             </div>
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-                {tables.map(table => (
+                {sortedTables.map(table => (
                     <div
                         key={table.id}
                         onClick={() => {
@@ -2599,7 +2616,7 @@ const TableMap = ({
                                     className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-accent bg-white text-slate-900"
                                 >
                                     <option value="">-- เลือกโต๊ะ --</option>
-                                    {tables
+                                    {sortedTables
                                         .filter(t => t.id !== moveFromTable.id && !t.currentOrderId)
                                         .map(t => (
                                             <option key={t.id} value={t.id}>

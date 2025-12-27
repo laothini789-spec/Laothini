@@ -122,6 +122,9 @@ create policy "Tables insert auth" on tables
 create policy "Tables update auth" on tables
   for update using (auth.role() = 'authenticated');
 
+create policy "Tables delete anon" on tables
+  for delete using (true);
+
 create policy "Orders read all" on orders
   for select using (true);
 
